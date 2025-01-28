@@ -50,6 +50,11 @@ export const notificationTransaction = async (req, res) => {
                     await query('UPDATE avatars SET purchased= ? WHERE id = ?', [1, id]);
                 })
 
+                const idsPreviewAvatar = avatars.filter(item => item.avatar_id === 11).map(item => item.id);
+                idsPreviewAvatar.map(async id => {
+                    await query('UPDATE avatars SET purchased= ? WHERE id = ?', [1, id]);
+                })
+
             } else {
                 sendConfirmationEmail(item.service, item.name, item.email, item.phone, item.date);
             }
