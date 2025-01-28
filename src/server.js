@@ -36,7 +36,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/pay', transactionRoutes);
 app.use('/api/user', personRoutes);
 
-app.use('/admin', adminRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.listen(3102, () => {
   console.log('Server is running on port 3001');

@@ -4,7 +4,7 @@ import { query } from '../models/db.js';
 export const getProfile = async (req, res) => {
     const userId = req.userId;
 
-    const queryRequest = `SELECT people.*, users.email FROM people JOIN users ON users.id = people.user_id WHERE people.user_id = ?`;
+    const queryRequest = `SELECT people.*, users.email, users.is_admin FROM people JOIN users ON users.id = people.user_id WHERE people.user_id = ?`;
   
     const people = await query(queryRequest, [userId]);
     
