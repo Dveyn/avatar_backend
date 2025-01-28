@@ -15,8 +15,8 @@ export const sendConfirmationEmail = async (email, token) => {
     port: 465,
     secure: true,
     auth: {
-      user: 'i@ananievds.ru',
-      pass: 'Dveyn8928',
+      user: mail,
+      pass: password,
     },
   });
 
@@ -24,7 +24,7 @@ export const sendConfirmationEmail = async (email, token) => {
     from: mail,
     to: email,
     subject: 'Подтверждение регистрации',
-    html: `<p>Для подтверждения вашей почты перейдите по <a href="http://localhost:3000/api/confirm-email/${token}">ссылке</a></p>`,
+    html: `<p>Для подтверждения вашей почты перейдите по <a href="https://avalik-avatar.ru/confirm-email/${token}">ссылке</a></p>`,
   };
 
   await transporter.sendMail(mailOptions);
