@@ -32,9 +32,9 @@ app.use(cors({
 }));
 app.use(express.json());
 
-app.use('/auth', authRoutes);
-app.use('/pay', transactionRoutes);
-app.use('/user', personRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/pay', transactionRoutes);
+app.use('/api/user', personRoutes);
 
 app.use('/admin', adminRoutes);
 

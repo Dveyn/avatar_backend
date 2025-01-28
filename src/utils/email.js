@@ -8,7 +8,6 @@ export const sendConfirmationEmail = async (email, token) => {
 
   const mail = process.env.MAIL;
   const password = process.env.MAIL_PASSWORD;
-
   const transporter = nodemailer.createTransport({
     service: 'mail.ananievds.ru',
     host: 'mail.ananievds.ru',
@@ -31,7 +30,7 @@ export const sendConfirmationEmail = async (email, token) => {
 };
 
 
-export const sendPayEmail = async () => {
+export const sendPayEmail = async (title, name, email, phone, date) => {
   const mail = process.env.MAIL;
   const password = process.env.MAIL_PASSWORD;
 
@@ -47,8 +46,8 @@ export const sendPayEmail = async () => {
   });
 
   const mailOptions = {
-    from: mail,
-    to: 'kimavalik@gmail.com',
+    from: 'info@avalik-avatar.ru',
+    to: [ 'kimavalik@gmail.com', 'info@avalik-avatar.ru'],
     subject: 'Новый заказ консультации',
     html: `
       <div style="font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; color: #333;">

@@ -1,5 +1,5 @@
 import { query } from '../models/db.js';
-import { sendConfirmationEmail } from '../utils/email.js';
+import { sendConfirmationEmail, sendPayEmail } from '../utils/email.js';
 
 // Запись транзакции
 export const createTransaction = async (req, res) => {
@@ -56,7 +56,7 @@ export const notificationTransaction = async (req, res) => {
                 })
 
             } else {
-                sendConfirmationEmail(item.service, item.name, item.email, item.phone, item.date);
+                sendPayEmail(item.service, item.name, item.email, item.phone, item.date);
             }
         }
         res.send('ok');
