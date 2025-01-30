@@ -16,8 +16,10 @@ const JWT_REFRESH_EXPIRATION = '30d'; // Токен обновления дей�
 export const register = async (req, res) => {
   const { mail, gender, birdDay, result } = req.body;
   if (!mail) {
-    return res.status(400).json({ message: 'Email is required' });
+    return res.status(400).json({ isError: true, message: 'Email is required' });
   }
+
+  const normalizedEmail = normalizeEmail(mail); 
 
   const confirmationToken = uuidv4(); // Генерация уникального токена для подтверждения
   const confirmationExpires = new Date();
@@ -29,7 +31,7 @@ export const register = async (req, res) => {
             VALUES (?, ?, ?, ?)
         `;
 
-    const resultQuery = await query(queryRequest, [mail, confirmationToken, confirmationExpires, false]);
+    const resultQuery = await query(queryRequest, [normalizedEmail, confirmationToken, confirmationExpires, false]);
     const userId = resultQuery.insertId;
 
     const queryPiple = `
@@ -70,7 +72,7 @@ export const register = async (req, res) => {
     res.status(200).json({ message: 'Письмо с подтверждением отправлено на почту' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Ошибка регистрации' });
+    res.status(500).json({ isError: true, message: 'Ошибка регистрации' });
   }
 };
 
@@ -83,9 +85,9 @@ export const forgot = async (req, res) => {
   confirmationExpires.setHours(confirmationExpires.getHours() + 360); // Токен действует 1 час
 
   const respon = await query('SELECT * FROM users WHERE email = ?', [email]);
-  console.log(respon)
+  console.log(respon);
   if (!respon || respon.length < 1) {
-    return res.status(400).json({isError: true, message: 'Не найден пользователь с таким email' });
+    return res.status(400).json({ isError: true, message: 'Не найден пользователь с таким email' });
   }
 
   const resultQuery = await query('UPDATE users SET confirmation_token = ?, confirmation_expires = ?, is_confirmed=? WHERE email = ?', [confirmationToken, confirmationExpires, false, email]);
@@ -155,24 +157,24 @@ export const setPassword = async (req, res) => {
 // Авторизация
 export const login = async (req, res) => {
   const { email, password } = req.body;
-
+  const normalizedEmail = normalizeEmail(email); 
   if (!email || !password) {
     return res.status(400).json({ message: 'Email и пароль обязательны' });
   }
 
   try {
     const queryReq = `SELECT * FROM users WHERE email = ?`;
-    const [user] = await query(queryReq, [email]);
+    const [user] = await query(queryReq, [normalizedEmail]);
 
     if (!user) {
       return res.status(404).json({ message: 'Пользователь не найден' });
     }
 
     const isPasswordCorrect = await bcrypt.compare(password, user.password_hash);
-
+    console.log(isPasswordCorrect, password, await bcrypt.hash(password, 10), user.password_hash);
     if (!isPasswordCorrect) {
       const checked = hasher.CheckPassword(password, user.password_hash);
-      console.log(checked, password, hasher.HashPassword(password), user.password_hash);
+    
       if (!checked) return res.status(401).json({ message: 'Неверный пароль' });
     }
 
@@ -277,3 +279,6 @@ export const checkSession = async (req, res) => {
     res.status(400).json({ message: 'Неверный токен' });
   }
 };
+
+
+const normalizeEmail = (email) => email.toLowerCase();
