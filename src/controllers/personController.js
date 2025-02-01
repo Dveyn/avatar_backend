@@ -9,7 +9,7 @@ export const getProfile = async (req, res) => {
     const people = await query(queryRequest, [userId]);
     
     if (people.length > 1) {
-        res.status(200).json({ people: people.length, people: people });
+        res.status(200).json({ people: people.length, date: people[0], people: people });
     } else if (people.length === 1) {
         const peopleId = people[0].id;
         const avatars = await query('SELECT * FROM avatars WHERE person_id =? ', [peopleId]);
