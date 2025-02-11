@@ -34,7 +34,7 @@ export const createTransaction = async (req, res) => {
 export const notificationTransaction = async (req, res) => {
     const { OutSum, InvId, SignatureValue } = req.body;
 
-    console.log('NOTIFICATION BODY =>',req.body)
+    console.log('NOTIFICATION BODY =>',req.body, req)
 
     try {
         // Формируем свою подпись
