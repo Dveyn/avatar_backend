@@ -37,7 +37,6 @@ export const notificationTransaction = async (req, res) => {
     console.log('NOTIFICATION BODY =>',req.body, req)
 
     try {
-        // Формируем свою подпись
         const myCrc = crypto
             .createHash('md5')
             .update(`${OutSum}:${InvId}:${MRH_PASS2}`)

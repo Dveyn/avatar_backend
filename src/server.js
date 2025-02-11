@@ -30,6 +30,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, 
 }));
+
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
@@ -39,5 +41,5 @@ app.use('/api/user', personRoutes);
 app.use('/api/admin', adminRoutes);
 
 app.listen(3102, () => {
-  console.log('Server is running on port 3001');
+  console.log('Server is running on port 3102');
 });
