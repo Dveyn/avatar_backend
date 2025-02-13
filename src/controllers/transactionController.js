@@ -34,7 +34,7 @@ export const createTransaction = async (req, res) => {
 export const notificationTransaction = async (req, res) => {
     const { OutSum, InvId, SignatureValue } = req.body;
 
-    console.log('NOTIFICATION BODY =>',req.body, req)
+    console.log('NOTIFICATION BODY =>', req.body, req);
 
     try {
         const myCrc = crypto
@@ -91,11 +91,11 @@ export const notificationTransaction = async (req, res) => {
 export const robokassaSignature = async (req, res) => {
     if (req.method !== 'POST') return res.status(405).end();
 
-    const { mrh_login, out_summ, inv_id, pass1 } = req.body;
-
+    const { mrh_login, out_summ, inv_id, Receipt, pass1 } = req.body;
+    console.log('RECEIPT', Receipt)
     const signature = crypto
         .createHash('md5')
-        .update(`${mrh_login}:${out_summ}:${inv_id}:${pass1}`)
+        .update(`${mrh_login}:${out_summ}:${inv_id}:${Receipt}:${pass1}`)
         .digest('hex');
 
     res.json(signature);
