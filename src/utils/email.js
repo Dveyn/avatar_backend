@@ -3,11 +3,10 @@ dotenv.config();
 
 import nodemailer from 'nodemailer';
 
-
 export const sendConfirmationEmail = async (email, token) => {
-
   const mail = process.env.MAIL;
   const password = process.env.MAIL_PASSWORD;
+  
   const transporter = nodemailer.createTransport({
     service: 'mail.ananievds.ru',
     host: 'mail.ananievds.ru',
@@ -16,6 +15,9 @@ export const sendConfirmationEmail = async (email, token) => {
     auth: {
       user: mail,
       pass: password,
+    },
+    tls: {
+      rejectUnauthorized: false,
     },
   });
 
@@ -28,7 +30,6 @@ export const sendConfirmationEmail = async (email, token) => {
 
   await transporter.sendMail(mailOptions);
 };
-
 
 export const sendPayEmail = async (title, name, email, phone, date) => {
   const mail = process.env.MAIL;
@@ -43,11 +44,14 @@ export const sendPayEmail = async (title, name, email, phone, date) => {
       user: mail,
       pass: password,
     },
+    tls: {
+      rejectUnauthorized: false,
+    },
   });
 
   const mailOptions = {
     from: 'info@avalik-avatar.ru',
-    to: [ 'kimavalik@gmail.com', 'info@avalik-avatar.ru'],
+    to:  [ 'kimavalik@gmail.com', 'info@avalik-avatar.ru'],
     subject: 'Новый заказ консультации',
     html: `
       <div style="font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; color: #333;">
@@ -60,7 +64,7 @@ export const sendPayEmail = async (title, name, email, phone, date) => {
             <p style="margin: 0 0 10px;"><strong>Имя клиента:</strong> ${name}</p>
             <p style="margin: 0 0 10px;"><strong>Email:</strong> ${email}</p>
             <p style="margin: 0 0 10px;"><strong>Номер телефона:</strong> ${phone}</p>
-            <p style="margin: 0 0 10px;"><strong>Дата консультации:</strong> ${date}</p>
+            <p style="margin: 0 0 10px;"><strong>Дата:</strong> ${date}</p>
           </div>
           <div style="background-color: #f4f4f9; padding: 10px; text-align: center; font-size: 14px; color: #777;">
             <p style="margin: 0;">Это письмо отправлено автоматически. Пожалуйста, не отвечайте на него.</p>

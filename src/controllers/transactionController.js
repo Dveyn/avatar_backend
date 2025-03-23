@@ -63,17 +63,33 @@ export const notificationTransaction = async (req, res) => {
         const { user_id: userId, item: itemStr } = resultGet[0];
         const item = JSON.parse(itemStr);
 
-        // Если это покупка аватара
         if (item.isAvatar) {
             const avatars = await query('SELECT * FROM avatars WHERE person_id = ?', [item.people_id]);
 
-            // Покупка аватара с id = 11
-            const idsWithAvatar = avatars.filter(a => a.avatar_id === item.avatar_id).map(a => a.id);
+            // Определяем, что использовать: avatar_id или avatar_ids
+            const avatarIds = item.avatar_ids
+                ? item.avatar_ids
+                : [item.avatar_id]; // Делаем массив с одним ID, если только один аватар
+
+            // Фильтруем и получаем все ID, которые нужно обновить
+            const idsWithAvatar = avatars.filter(a => avatarIds.includes(a.avatar_id.toString())).map(a => a.id);
+
+            // Обновляем статусы всех найденных аватаров
             for (const id of idsWithAvatar) {
                 await query('UPDATE avatars SET purchased = ? WHERE id = ?', [1, id]);
             }
         } else {
-            // Отправляем email с информацией о покупке
+            if (item.posId === 2) {
+                // Находим первого человека пользователя по email
+                const [person] = await query('SELECT id FROM people WHERE user_id IN (SELECT id FROM users WHERE email = ?) ORDER BY id ASC LIMIT 1', [item.email]);
+
+                if (person) {
+                    await query('UPDATE avatars SET purchased = 1 WHERE person_id = ?', [person.id]);
+                    console.log(`Все аватары для первого человека пользователя ${item.email} помечены как купленные`);
+                } else {
+                    console.log(`Человек для пользователя ${item.email} не найден`);
+                }
+            }
             sendPayEmail(item.service, item.name, item.email, item.phone, item.date);
         }
 
@@ -87,12 +103,39 @@ export const notificationTransaction = async (req, res) => {
 };
 
 
+export const notificationTransactionTest = async () => {
+    const getQueryTransaction = 'SELECT user_id, item FROM transactions WHERE id=?';
+
+    const resultGet = await query(getQueryTransaction, [161]);
+    const { user_id: userId, item: itemStr } = resultGet[0];
+    const item = JSON.parse(itemStr);
+    
+    if (item.isAvatar) {
+        const avatars = await query('SELECT * FROM avatars WHERE person_id = ?', [item.people_id]);
+
+        // Определяем, что использовать: avatar_id или avatar_ids
+        const avatarIds = item.avatar_ids
+            ? item.avatar_ids // Разбиваем строку с ID
+            : [item.avatar_id]; // Делаем массив с одним ID, если только один аватар
+
+        // Фильтруем и получаем все ID, которые нужно обновить
+        const idsWithAvatar = avatars.filter(a => avatarIds.includes(a.avatar_id.toString())).map(a => a.id);
+
+        // Обновляем статусы всех найденных аватаров
+        for (const id of idsWithAvatar) {
+            await query('UPDATE avatars SET purchased = ? WHERE id = ?', [1, id]);
+        }
+    } else {
+        sendPayEmail(item.service, item.name, item.email, item.phone, item.date);
+    }
+};
+
 
 export const robokassaSignature = async (req, res) => {
     if (req.method !== 'POST') return res.status(405).end();
 
     const { mrh_login, out_summ, inv_id, Receipt, pass1 } = req.body;
-    console.log('RECEIPT', Receipt)
+    console.log('RECEIPT', Receipt);
     const signature = crypto
         .createHash('md5')
         .update(`${mrh_login}:${out_summ}:${inv_id}:${Receipt}:${pass1}`)
