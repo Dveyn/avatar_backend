@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { query } from '../models/db.js';
+import { sendOneMail } from '../utils/email.js';
 
 export const getUsers = async (req, res) => {
   const result = await query('SELECT id, email,is_confirmed, is_admin  FROM users', []);
@@ -50,4 +51,11 @@ export const setAll= async (req, res) => {
   const totalResult = await query('SELECT *  FROM avatars WHERE person_id= ?', [peopleId]);
 
   res.status(200).json({ date: totalResult });
+};
+
+
+export const sendMailCustom = async (req, res) => {
+
+  sendOneMail();
+  res.status(200).json({ msg: 'GOOD' });
 };
