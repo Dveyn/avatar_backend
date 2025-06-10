@@ -7,41 +7,179 @@ import jwt from 'jsonwebtoken';
 import { sendConfirmationEmail } from '../utils/email.js';
 import { v4 as uuidv4 } from 'uuid';
 import hasher from 'wordpress-hash-node';
+import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION;
 const JWT_REFRESH_EXPIRATION = '30d'; // Токен обновления действует 30 дней
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+
+// Вспомогательные функции для работы с токенами
+const generateTokens = (userId) => {
+  const accessToken = jwt.sign({ userId }, JWT_SECRET, {
+    expiresIn: JWT_EXPIRATION,
+  });
+
+  const refreshToken = jwt.sign({ userId }, JWT_SECRET, {
+    expiresIn: JWT_REFRESH_EXPIRATION,
+  });
+
+  return { accessToken, refreshToken };
+};
+
+const saveRefreshToken = async (userId, refreshToken) => {
+  const sessionQuery = `
+    INSERT INTO user_sessions (user_id, refresh_token)
+    VALUES (?, ?)
+    ON DUPLICATE KEY UPDATE refresh_token = ?
+  `;
+  await query(sessionQuery, [userId, refreshToken, refreshToken]);
+};
+
+// Проверка данных Telegram
+const verifyTelegramData = (data) => {
+  const { hash, ...otherData } = data;
+  
+  const dataCheckString = Object.keys(otherData)
+    .sort()
+    .map(key => `${key}=${otherData[key]}`)
+    .join('\n');
+
+  const secretKey = crypto
+    .createHash('sha256')
+    .update(TELEGRAM_BOT_TOKEN)
+    .digest();
+
+  const calculatedHash = crypto
+    .createHmac('sha256', secretKey)
+    .update(dataCheckString)
+    .digest('hex');
+
+  return calculatedHash === hash;
+};
 
 // Регистрация пользователя
 export const register = async (req, res) => {
-  const { mail, gender, birdDay, result } = req.body;
-  if (!mail) {
-    return res.status(400).json({ isError: true, message: 'Email is required' });
-  }
-
-  const normalizedEmail = normalizeEmail(mail); 
-
-  const confirmationToken = uuidv4(); // Генерация уникального токена для подтверждения
-  const confirmationExpires = new Date();
-  confirmationExpires.setHours(confirmationExpires.getHours() + 360); // Токен действует 1 час
-
+  const { provider, socialData, mail, gender, birdDay, result } = req.body;
+  
   try {
-    const queryRequest = `
-            INSERT INTO users (email, confirmation_token, confirmation_expires, is_confirmed)
-            VALUES (?, ?, ?, ?)
-        `;
+    // Проверка данных от Telegram
+    if (provider === 'telegram' && socialData) {
+      if (!verifyTelegramData(socialData)) {
+        return res.status(400).json({ 
+          isError: true, 
+          message: 'Неверные данные от Telegram' 
+        });
+      }
+    }
 
-    const resultQuery = await query(queryRequest, [normalizedEmail, confirmationToken, confirmationExpires, false]);
+    // Проверка обязательных полей
+    if (!provider && !mail) {
+      return res.status(400).json({ 
+        isError: true, 
+        message: 'Email или данные соцсети обязательны' 
+      });
+    }
+
+    const normalizedEmail = mail ? normalizeEmail(mail) : null;
+    const confirmationToken = uuidv4();
+    const confirmationExpires = new Date();
+    confirmationExpires.setHours(confirmationExpires.getHours() + 360);
+
+    // Проверяем существование пользователя
+    let existingUser = null;
+    if (provider && socialData?.id) {
+      [existingUser] = await query(
+        'SELECT * FROM users WHERE provider = ? AND social_id = ?',
+        [provider, socialData.id.toString()]
+      );
+    } else if (normalizedEmail) {
+      [existingUser] = await query(
+        'SELECT * FROM users WHERE email = ?',
+        [normalizedEmail]
+      );
+    }
+
+    if (existingUser) {
+      // Обновляем существующего пользователя
+      const updateQuery = `
+        UPDATE users 
+        SET social_data = ?,
+            is_confirmed = ?
+        WHERE id = ?
+      `;
+      await query(updateQuery, [
+        JSON.stringify(socialData),
+        provider ? true : existingUser.is_confirmed,
+        existingUser.id
+      ]);
+
+      // Генерируем токены
+      const { accessToken, refreshToken } = generateTokens(existingUser.id);
+      await saveRefreshToken(existingUser.id, refreshToken);
+
+      // Устанавливаем куки
+      res.cookie('accessToken', accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 24 * 60 * 60 * 1000
+      });
+
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 30 * 24 * 60 * 60 * 1000
+      });
+
+      return res.status(200).json({
+        message: 'Пользователь обновлен',
+        user: { id: existingUser.id }
+      });
+    }
+
+    // Создаем нового пользователя
+    const insertUserQuery = `
+      INSERT INTO users (
+        email,
+        provider,
+        social_id,
+        social_data,
+        confirmation_token,
+        confirmation_expires,
+        is_confirmed
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    const resultQuery = await query(insertUserQuery, [
+      normalizedEmail,
+      provider || 'email',
+      socialData?.id?.toString(),
+      JSON.stringify(socialData),
+      confirmationToken,
+      confirmationExpires,
+      provider ? true : false
+    ]);
+
     const userId = resultQuery.insertId;
 
+    // Создаем запись в таблице people
     const queryPiple = `
-            INSERT INTO people (user_id, name, gender, birth_date)
-            VALUES (?, ?, ?, ?)
-        `;
+      INSERT INTO people (user_id, name, gender, birth_date)
+      VALUES (?, ?, ?, ?)
+    `;
 
-    const resultQueryPiple = await query(queryPiple, [userId, 'Я', gender, birdDay]);
+    const resultQueryPiple = await query(queryPiple, [
+      userId,
+      'Я',
+      gender,
+      birdDay
+    ]);
+
     const personId = resultQueryPiple.insertId;
 
+    // Добавляем аватары
     const avatars = [
       { keyWord: 'A', avatar_id: result.A, purchased: 0, preview: 1 },
       { keyWord: 'B', avatar_id: result.B, purchased: 0, preview: 0 },
@@ -55,24 +193,59 @@ export const register = async (req, res) => {
       { keyWord: 'B2', avatar_id: result.B2, purchased: 0, preview: 0 },
     ];
 
-    avatars.filter(av => av.avatar_id === result.A)?.map(el => el.preview = 1);
+    const avatarQuery = `
+      INSERT INTO avatars (person_id, keyWord, avatar_id, purchased, preview)
+      VALUES (?, ?, ?, ?, ?)
+    `;
 
-    const avatarQuery = `INSERT INTO avatars (person_id, keyWord, avatar_id, purchased, preview) VALUES (?,?,?,?, ?)`;
-
-    try {
-      for (const avatar of avatars) {
-        await query(avatarQuery, [personId, avatar.keyWord, avatar.avatar_id, avatar.purchased, avatar.preview]);
-      }
-      console.log('Все аватары успешно добавлены.');
-    } catch (error) {
-      console.error('Ошибка при добавлении аватаров:', error);
+    for (const avatar of avatars) {
+      await query(avatarQuery, [
+        personId,
+        avatar.keyWord,
+        avatar.avatar_id,
+        avatar.purchased,
+        avatar.preview
+      ]);
     }
-    await sendConfirmationEmail(mail, confirmationToken);
 
-    res.status(200).json({ message: 'Письмо с подтверждением отправлено на почту' });
+    // Если это обычная регистрация - отправляем письмо
+    if (!provider) {
+      await sendConfirmationEmail(mail, confirmationToken);
+      return res.status(200).json({
+        message: 'Письмо с подтверждением отправлено на почту'
+      });
+    }
+
+    // Для соцсетей генерируем токены
+    const { accessToken, refreshToken } = generateTokens(userId);
+    await saveRefreshToken(userId, refreshToken);
+
+    // Устанавливаем куки
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000
+    });
+
+    res.status(200).json({
+      message: 'Пользователь успешно зарегистрирован',
+      user: { id: userId }
+    });
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ isError: true, message: 'Ошибка регистрации' });
+    console.error('Ошибка регистрации:', error);
+    res.status(500).json({
+      isError: true,
+      message: 'Ошибка регистрации'
+    });
   }
 };
 
