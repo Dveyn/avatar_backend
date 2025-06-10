@@ -38,12 +38,19 @@ const saveRefreshToken = async (userId, refreshToken) => {
 
 // Проверка данных Telegram
 const verifyTelegramData = (data) => {
-  const { hash, ...otherData } = data;
+  const { hash, day, month, year, gender, ...otherData } = data;
   
+  // Сортируем только те поля, которые должны участвовать в проверке
   const dataCheckString = Object.keys(otherData)
     .sort()
     .map(key => `${key}=${otherData[key]}`)
     .join('\n');
+
+  console.log('Telegram verification:', {
+    dataCheckString,
+    receivedHash: hash,
+    botToken: TELEGRAM_BOT_TOKEN ? 'defined' : 'undefined'
+  });
 
   const secretKey = crypto
     .createHash('sha256')
@@ -54,6 +61,12 @@ const verifyTelegramData = (data) => {
     .createHmac('sha256', secretKey)
     .update(dataCheckString)
     .digest('hex');
+
+  console.log('Hash comparison:', {
+    calculatedHash,
+    receivedHash: hash,
+    match: calculatedHash === hash
+  });
 
   return calculatedHash === hash;
 };
