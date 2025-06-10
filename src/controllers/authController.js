@@ -63,9 +63,22 @@ export const register = async (req, res) => {
   const { provider, socialData, mail, gender, birdDay, result } = req.body;
   
   try {
+    // Парсим данные от Telegram, если они пришли как строка
+    let parsedSocialData = socialData;
+    if (typeof socialData === 'string') {
+      try {
+        parsedSocialData = JSON.parse(socialData);
+      } catch (e) {
+        return res.status(400).json({ 
+          isError: true, 
+          message: 'Неверный формат данных от Telegram' 
+        });
+      }
+    }
+
     // Проверка данных от Telegram
-    if (provider === 'telegram' && socialData) {
-      if (!verifyTelegramData(socialData)) {
+    if (provider === 'telegram' && parsedSocialData) {
+      if (!verifyTelegramData(parsedSocialData)) {
         return res.status(400).json({ 
           isError: true, 
           message: 'Неверные данные от Telegram' 
@@ -88,10 +101,10 @@ export const register = async (req, res) => {
 
     // Проверяем существование пользователя
     let existingUser = null;
-    if (provider && socialData?.id) {
+    if (provider && parsedSocialData?.id) {
       [existingUser] = await query(
         'SELECT * FROM users WHERE provider = ? AND social_id = ?',
-        [provider, socialData.id.toString()]
+        [provider, parsedSocialData.id.toString()]
       );
     } else if (normalizedEmail) {
       [existingUser] = await query(
@@ -109,7 +122,7 @@ export const register = async (req, res) => {
         WHERE id = ?
       `;
       await query(updateQuery, [
-        JSON.stringify(socialData),
+        JSON.stringify(parsedSocialData),
         provider ? true : existingUser.is_confirmed,
         existingUser.id
       ]);
@@ -155,8 +168,8 @@ export const register = async (req, res) => {
     const resultQuery = await query(insertUserQuery, [
       normalizedEmail,
       provider || 'email',
-      socialData?.id?.toString(),
-      JSON.stringify(socialData),
+      parsedSocialData?.id?.toString(),
+      JSON.stringify(parsedSocialData),
       confirmationToken,
       confirmationExpires,
       provider ? true : false
@@ -172,7 +185,7 @@ export const register = async (req, res) => {
 
     const resultQueryPiple = await query(queryPiple, [
       userId,
-      'Я',
+      parsedSocialData?.first_name || 'Я',
       gender,
       birdDay
     ]);
@@ -210,7 +223,7 @@ export const register = async (req, res) => {
 
     // Если это обычная регистрация - отправляем письмо
     if (!provider) {
-      await sendConfirmationEmail(mail, confirmationToken);
+      await sendConfirmationEmail(normalizedEmail, confirmationToken);
       return res.status(200).json({
         message: 'Письмо с подтверждением отправлено на почту'
       });
