@@ -32,7 +32,7 @@ const saveRefreshToken = async (userId, refreshToken) => {
 
 // Helper function to create or update user
 const createOrUpdateUser = async (userData) => {
-  const { email, provider, socialId, firstName, lastName, photo } = userData;
+  const { email, provider, socialId, firstName, lastName, photo, gender } = userData;
   
   // Check if user exists by social ID
   let user;
@@ -60,7 +60,7 @@ const createOrUpdateUser = async (userData) => {
     await query(updateQuery, [
       socialId,
       provider,
-      JSON.stringify({ firstName, lastName, photo }),
+      JSON.stringify({ firstName, lastName, photo, gender }),
       user.id
     ]);
     return user.id;
@@ -79,7 +79,7 @@ const createOrUpdateUser = async (userData) => {
       email,
       socialId,
       provider,
-      JSON.stringify({ firstName, lastName, photo })
+      JSON.stringify({ firstName, lastName, photo, gender })
     ]);
     return result.insertId;
   }
@@ -88,21 +88,49 @@ const createOrUpdateUser = async (userData) => {
 // VK Authentication
 export const vkAuth = async (req, res) => {
   try {
-    const { vkData } = req.body;
-    const { id, email, firstName, lastName, photo } = vkData;
-
-    if (!id) {
-      return res.status(400).json({ message: 'VK ID is required' });
+    const { provider, socialData } = req.body;
+    
+    if (provider !== 'vk') {
+      return res.status(400).json({ message: 'Invalid provider' });
     }
 
+    let parsedData;
+    try {
+      parsedData = JSON.parse(socialData);
+    } catch (e) {
+      return res.status(400).json({ message: 'Invalid social data format' });
+    }
+
+    const { user } = parsedData;
+    if (!user || !user.user_id) {
+      return res.status(400).json({ message: 'VK user data is required' });
+    }
+
+    // Преобразуем пол из ВК в наш формат
+    // В ВК: 1 - женский, 2 - мужской
+    const gender = user.sex === 2 ? 'male' : user.sex === 1 ? 'female' : null;
+
     const userId = await createOrUpdateUser({
-      email,
       provider: 'vk',
-      socialId: id.toString(),
-      firstName,
-      lastName,
-      photo
+      socialId: user.user_id.toString(),
+      firstName: user.first_name,
+      lastName: user.last_name,
+      photo: user.avatar,
+      gender
     });
+
+    // Создаем запись в таблице people
+    const queryPeople = `
+      INSERT INTO people (user_id, name, gender, birth_date)
+      VALUES (?, ?, ?, ?)
+    `;
+
+    await query(queryPeople, [
+      userId,
+      `${user.first_name} ${user.last_name}`,
+      gender,
+      user.birthday || null
+    ]);
 
     const { accessToken, refreshToken } = generateTokens(userId);
     await saveRefreshToken(userId, refreshToken);
