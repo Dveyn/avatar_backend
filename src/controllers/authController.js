@@ -71,6 +71,19 @@ const verifyTelegramData = (data) => {
   return calculatedHash === hash;
 };
 
+// Вспомогательная функция для преобразования даты
+const formatDate = (dateStr) => {
+  if (!dateStr) return null;
+  
+  // Если дата в формате DD.MM.YYYY
+  if (dateStr.includes('.')) {
+    const [day, month, year] = dateStr.split('.');
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+  
+  return dateStr;
+};
+
 // Регистрация пользователя
 export const register = async (req, res) => {
   const { provider, socialData, mail, gender, birdDay, result } = req.body;
@@ -212,8 +225,8 @@ export const register = async (req, res) => {
       : gender;
 
     const birthDate = provider === 'vk'
-      ? parsedSocialData.user.birthday
-      : birdDay;
+      ? formatDate(parsedSocialData.user.birthday)
+      : formatDate(birdDay);
 
     const resultQueryPiple = await query(queryPiple, [
       userId,
