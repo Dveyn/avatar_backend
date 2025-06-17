@@ -295,7 +295,9 @@ export const register = async (req, res) => {
 
     res.status(200).json({
       message: 'Пользователь успешно зарегистрирован',
-      user: { id: userId }
+      user: { id: userId },
+      accessToken,
+      refreshToken
     });
 
   } catch (error) {
@@ -483,7 +485,9 @@ export const login = async (req, res) => {
 
     res.status(200).json({
       message: 'Успешная авторизация',
-      user: { id: user.id }
+      user: { id: user.id },
+      accessToken,
+      refreshToken
     });
   } catch (error) {
     console.error('Ошибка авторизации:', error);
