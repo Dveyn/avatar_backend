@@ -114,7 +114,12 @@ export const register = async (req, res) => {
 
     // Проверяем существование пользователя
     let existingUser = null;
-    if (provider && parsedSocialData?.id) {
+    if (provider === 'vk' && parsedSocialData?.user?.user_id) {
+      [existingUser] = await query(
+        'SELECT * FROM users WHERE provider = ? AND social_id = ?',
+        [provider, parsedSocialData.user.user_id.toString()]
+      );
+    } else if (provider === 'telegram' && parsedSocialData?.id) {
       [existingUser] = await query(
         'SELECT * FROM users WHERE provider = ? AND social_id = ?',
         [provider, parsedSocialData.id.toString()]
@@ -178,10 +183,12 @@ export const register = async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
 
+    const socialId = provider === 'vk' ? parsedSocialData.user.user_id : parsedSocialData.id;
+
     const resultQuery = await query(insertUserQuery, [
       normalizedEmail,
       provider || 'email',
-      parsedSocialData?.id?.toString(),
+      socialId?.toString(),
       JSON.stringify(parsedSocialData),
       confirmationToken,
       confirmationExpires,
@@ -196,11 +203,23 @@ export const register = async (req, res) => {
       VALUES (?, ?, ?, ?)
     `;
 
+    const name = provider === 'vk' 
+      ? `${parsedSocialData.user.first_name} ${parsedSocialData.user.last_name}`
+      : parsedSocialData.first_name || 'Я';
+
+    const userGender = provider === 'vk'
+      ? (parsedSocialData.user.sex === 2 ? 'male' : parsedSocialData.user.sex === 1 ? 'female' : null)
+      : gender;
+
+    const birthDate = provider === 'vk'
+      ? parsedSocialData.user.birthday
+      : birdDay;
+
     const resultQueryPiple = await query(queryPiple, [
       userId,
-      parsedSocialData?.first_name || 'Я',
-      gender,
-      birdDay
+      name,
+      userGender,
+      birthDate
     ]);
 
     const personId = resultQueryPiple.insertId;
@@ -355,26 +374,62 @@ export const setPassword = async (req, res) => {
 
 // Авторизация
 export const login = async (req, res) => {
-  const { email, password } = req.body;
-  const normalizedEmail = normalizeEmail(email); 
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email и пароль обязательны' });
-  }
-
+  const { email, password, provider, socialData } = req.body;
+  
   try {
-    const queryReq = `SELECT * FROM users WHERE email = ?`;
-    const [user] = await query(queryReq, [normalizedEmail]);
+    let user = null;
+
+    // Если это вход через соцсеть
+    if (provider && socialData) {
+      let parsedSocialData;
+      try {
+        parsedSocialData = JSON.parse(socialData);
+      } catch (e) {
+        return res.status(400).json({ 
+          isError: true, 
+          message: 'Неверный формат данных от соцсети' 
+        });
+      }
+
+      // Получаем ID пользователя в зависимости от провайдера
+      const socialId = provider === 'vk' 
+        ? parsedSocialData.user.user_id 
+        : parsedSocialData.id;
+
+      if (!socialId) {
+        return res.status(400).json({ 
+          isError: true, 
+          message: 'ID пользователя не найден' 
+        });
+      }
+
+      // Ищем пользователя по ID соцсети
+      [user] = await query(
+        'SELECT * FROM users WHERE provider = ? AND social_id = ?',
+        [provider, socialId.toString()]
+      );
+    } else {
+      // Обычный вход по email/паролю
+      if (!email || !password) {
+        return res.status(400).json({ message: 'Email и пароль обязательны' });
+      }
+
+      const normalizedEmail = normalizeEmail(email);
+      [user] = await query('SELECT * FROM users WHERE email = ?', [normalizedEmail]);
+
+      if (!user) {
+        return res.status(404).json({ message: 'Пользователь не найден' });
+      }
+
+      const isPasswordCorrect = await bcrypt.compare(password, user.password_hash);
+      if (!isPasswordCorrect) {
+        const checked = hasher.CheckPassword(password, user.password_hash);
+        if (!checked) return res.status(401).json({ message: 'Неверный пароль' });
+      }
+    }
 
     if (!user) {
       return res.status(404).json({ message: 'Пользователь не найден' });
-    }
-
-    const isPasswordCorrect = await bcrypt.compare(password, user.password_hash);
-    console.log(isPasswordCorrect, password, await bcrypt.hash(password, 10), user.password_hash);
-    if (!isPasswordCorrect) {
-      const checked = hasher.CheckPassword(password, user.password_hash);
-    
-      if (!checked) return res.status(401).json({ message: 'Неверный пароль' });
     }
 
     if (!user.is_confirmed) {
@@ -392,18 +447,33 @@ export const login = async (req, res) => {
 
     // Сохраняем refreshToken в базе данных для дальнейшей валидации
     const sessionQuery = `
-            INSERT INTO user_sessions (user_id, refresh_token)
-            VALUES (?, ?)
-            ON DUPLICATE KEY UPDATE refresh_token = ?
-        `;
+      INSERT INTO user_sessions (user_id, refresh_token)
+      VALUES (?, ?)
+      ON DUPLICATE KEY UPDATE refresh_token = ?
+    `;
     await query(sessionQuery, [user.id, refreshToken, refreshToken]);
 
+    // Устанавливаем куки
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    });
+
     res.status(200).json({
-      accessToken,
-      refreshToken,
+      message: 'Успешная авторизация',
+      user: { id: user.id }
     });
   } catch (error) {
-    console.error(error);
+    console.error('Ошибка авторизации:', error);
     res.status(500).json({ message: 'Ошибка авторизации' });
   }
 };
