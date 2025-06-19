@@ -7,6 +7,19 @@ const JWT_EXPIRATION = process.env.JWT_EXPIRATION;
 const JWT_REFRESH_EXPIRATION = '30d';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
+// Вспомогательная функция для преобразования даты
+const formatDate = (dateStr) => {
+  if (!dateStr) return null;
+  
+  // Если дата в формате DD.MM.YYYY
+  if (dateStr.includes('.')) {
+    const [day, month, year] = dateStr.split('.');
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+  
+  return dateStr;
+};
+
 // Helper function to generate JWT tokens
 const generateTokens = (userId) => {
   const accessToken = jwt.sign({ userId }, JWT_SECRET, {
@@ -223,5 +236,26 @@ export const telegramAuth = async (req, res) => {
   } catch (error) {
     console.error('Telegram auth error:', error);
     res.status(500).json({ message: 'Error during Telegram authentication' });
+  }
+};
+
+// VK Callback for OAuth flow
+export const vkCallback = async (req, res) => {
+  try {
+    const { code, state } = req.query;
+    
+    if (!code) {
+      return res.status(400).json({ message: 'Authorization code is required' });
+    }
+
+    // Просто возвращаем код для обработки на фронтенде
+    res.status(200).json({
+      message: 'VK callback received',
+      code,
+      state
+    });
+  } catch (error) {
+    console.error('VK callback error:', error);
+    res.status(500).json({ message: 'Error during VK callback' });
   }
 }; 

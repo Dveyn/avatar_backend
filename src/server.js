@@ -10,6 +10,7 @@ import cors from 'cors';
 
 const allowedOrigins = [
   'http://localhost:3000',
+  'https://localhost',
   'http://test.ananievds.ru',
   'https://test.ananievds.ru',
   'https://avalik-avatar.ru',

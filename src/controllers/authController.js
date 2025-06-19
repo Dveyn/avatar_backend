@@ -88,13 +88,17 @@ const formatDate = (dateStr) => {
 export const register = async (req, res) => {
   const { provider, socialData, mail, gender, birdDay, result } = req.body;
   
+  console.log('Register request:', { provider, socialData: socialData ? 'present' : 'missing', mail, gender, birdDay, result });
+  
   try {
     // Парсим данные от Telegram, если они пришли как строка
     let parsedSocialData = socialData;
     if (typeof socialData === 'string') {
       try {
         parsedSocialData = JSON.parse(socialData);
+        console.log('Parsed social data:', parsedSocialData);
       } catch (e) {
+        console.error('Failed to parse social data:', e);
         return res.status(400).json({ 
           isError: true, 
           message: 'Неверный формат данных от Telegram' 
@@ -114,11 +118,14 @@ export const register = async (req, res) => {
 
     // Проверка обязательных полей
     if (!provider && !mail) {
+      console.log('No provider and no mail provided');
       return res.status(400).json({ 
         isError: true, 
         message: 'Email или данные соцсети обязательны' 
       });
     }
+
+    console.log('Provider:', provider, 'Mail:', mail);
 
     const normalizedEmail = mail ? normalizeEmail(mail) : null;
     const confirmationToken = uuidv4();
@@ -179,7 +186,9 @@ export const register = async (req, res) => {
 
       return res.status(200).json({
         message: 'Пользователь обновлен',
-        user: { id: existingUser.id }
+        user: { id: existingUser.id },
+        accessToken,
+        refreshToken
       });
     }
 
@@ -268,6 +277,7 @@ export const register = async (req, res) => {
 
     // Если это обычная регистрация - отправляем письмо
     if (!provider) {
+      console.log('Regular registration - sending email');
       await sendConfirmationEmail(normalizedEmail, confirmationToken);
       return res.status(200).json({
         message: 'Письмо с подтверждением отправлено на почту'
@@ -275,6 +285,7 @@ export const register = async (req, res) => {
     }
 
     // Для соцсетей генерируем токены
+    console.log('Social registration - generating tokens for provider:', provider);
     const { accessToken, refreshToken } = generateTokens(userId);
     await saveRefreshToken(userId, refreshToken);
 
@@ -293,6 +304,7 @@ export const register = async (req, res) => {
       maxAge: 30 * 24 * 60 * 60 * 1000
     });
 
+    console.log('Sending response with tokens for user:', userId);
     res.status(200).json({
       message: 'Пользователь успешно зарегистрирован',
       user: { id: userId },
