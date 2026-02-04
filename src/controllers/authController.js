@@ -8,6 +8,10 @@ import { sendConfirmationEmail } from '../utils/email.js';
 import { v4 as uuidv4 } from 'uuid';
 import hasher from 'wordpress-hash-node';
 import crypto from 'crypto';
+import { asyncHandler, AuthenticationError, NotFoundError, ValidationError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
+import { insertAvatarsBatch } from '../utils/dbHelpers.js';
+import { notifyViaTelegramBot } from '../utils/telegramBotClient.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION;
@@ -46,7 +50,7 @@ const verifyTelegramData = (data) => {
     .map(key => `${key}=${otherData[key]}`)
     .join('\n');
 
-  console.log('Telegram verification:', {
+  logger.debug('Telegram verification', {
     dataCheckString,
     receivedHash: hash,
     botToken: TELEGRAM_BOT_TOKEN ? 'defined' : 'undefined'
@@ -62,7 +66,7 @@ const verifyTelegramData = (data) => {
     .update(dataCheckString)
     .digest('hex');
 
-  console.log('Hash comparison:', {
+  logger.debug('Hash comparison', {
     calculatedHash,
     receivedHash: hash,
     match: calculatedHash === hash
@@ -88,7 +92,7 @@ const formatDate = (dateStr) => {
 export const register = async (req, res) => {
   const { provider, socialData, mail, gender, birdDay, result } = req.body;
   
-  console.log('Register request:', { provider, socialData: socialData ? 'present' : 'missing', mail, gender, birdDay, result });
+  logger.debug('Register request', { provider, socialData: socialData ? 'present' : 'missing', mail, gender, birdDay });
   
   try {
     // Парсим данные от Telegram, если они пришли как строка
@@ -96,9 +100,9 @@ export const register = async (req, res) => {
     if (typeof socialData === 'string') {
       try {
         parsedSocialData = JSON.parse(socialData);
-        console.log('Parsed social data:', parsedSocialData);
+        logger.debug('Parsed social data', parsedSocialData);
       } catch (e) {
-        console.error('Failed to parse social data:', e);
+        logger.error('Failed to parse social data', { error: e.message });
         return res.status(400).json({ 
           isError: true, 
           message: 'Неверный формат данных от Telegram' 
@@ -118,14 +122,14 @@ export const register = async (req, res) => {
 
     // Проверка обязательных полей
     if (!provider && !mail) {
-      console.log('No provider and no mail provided');
+      logger.debug('No provider and no mail provided');
       return res.status(400).json({ 
         isError: true, 
         message: 'Email или данные соцсети обязательны' 
       });
     }
 
-    console.log('Provider:', provider, 'Mail:', mail);
+    logger.debug('Registration', { provider, mail: mail ? 'provided' : 'missing' });
 
     const normalizedEmail = mail ? normalizeEmail(mail) : null;
     const confirmationToken = uuidv4();
@@ -260,24 +264,13 @@ export const register = async (req, res) => {
       { keyWord: 'B2', avatar_id: result.B2, purchased: 0, preview: 0 },
     ];
 
-    const avatarQuery = `
-      INSERT INTO avatars (person_id, keyWord, avatar_id, purchased, preview)
-      VALUES (?, ?, ?, ?, ?)
-    `;
-
-    for (const avatar of avatars) {
-      await query(avatarQuery, [
-        personId,
-        avatar.keyWord,
-        avatar.avatar_id,
-        avatar.purchased,
-        avatar.preview
-      ]);
-    }
+    // Используем batch insert вместо цикла для оптимизации
+    await insertAvatarsBatch(query, personId, avatars);
+    logger.debug(`Успешно добавлено ${avatars.length} аватаров для person_id: ${personId}`);
 
     // Если это обычная регистрация - отправляем письмо
     if (!provider) {
-      console.log('Regular registration - sending email');
+      logger.info('Regular registration - sending email', { email: normalizedEmail });
       await sendConfirmationEmail(normalizedEmail, confirmationToken);
       return res.status(200).json({
         message: 'Письмо с подтверждением отправлено на почту'
@@ -285,9 +278,17 @@ export const register = async (req, res) => {
     }
 
     // Для соцсетей генерируем токены
-    console.log('Social registration - generating tokens for provider:', provider);
+    logger.info('Social registration - generating tokens', { provider, userId });
     const { accessToken, refreshToken } = generateTokens(userId);
     await saveRefreshToken(userId, refreshToken);
+
+    // Fire-and-forget notification (do not block registration)
+    const socialIdForNotify =
+      provider === 'vk' ? parsedSocialData?.user?.user_id : parsedSocialData?.id;
+    notifyViaTelegramBot(
+      `🎉 Новый пользователь зарегистрировался через ${provider}\nUser ID: ${userId}` +
+        (socialIdForNotify ? `\nSocial ID: ${socialIdForNotify}` : '')
+    ).catch(() => {});
 
     // Устанавливаем куки
     res.cookie('accessToken', accessToken, {
@@ -304,7 +305,7 @@ export const register = async (req, res) => {
       maxAge: 30 * 24 * 60 * 60 * 1000
     });
 
-    console.log('Sending response with tokens for user:', userId);
+    logger.debug('Sending response with tokens', { userId });
     res.status(200).json({
       message: 'Пользователь успешно зарегистрирован',
       user: { id: userId },
@@ -313,7 +314,7 @@ export const register = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Ошибка регистрации:', error);
+    logger.error('Ошибка регистрации', { error: error.message, stack: error.stack });
     res.status(500).json({
       isError: true,
       message: 'Ошибка регистрации'
@@ -330,7 +331,6 @@ export const forgot = async (req, res) => {
   confirmationExpires.setHours(confirmationExpires.getHours() + 360); // Токен действует 1 час
 
   const respon = await query('SELECT * FROM users WHERE email = ?', [email]);
-  console.log(respon);
   if (!respon || respon.length < 1) {
     return res.status(400).json({ isError: true, message: 'Не найден пользователь с таким email' });
   }
@@ -364,7 +364,7 @@ export const confirmEmail = async (req, res) => {
 
     res.status(200).json({ message: 'Почта подтверждена' });
   } catch (error) {
-    console.error(error);
+    logger.error('Ошибка подтверждения почты', { error: error.message });
     res.status(500).json({ message: 'Ошибка подтверждения почты' });
   }
 };
@@ -380,7 +380,6 @@ export const setPassword = async (req, res) => {
     const queryRequest = `SELECT * FROM users WHERE confirmation_token = ?`;
     const userReq = await query(queryRequest, [token]);
     const user = userReq[0];
-    console.log(user, user.is_confirmed, !user.is_confirmed);
     if (!user || !user.is_confirmed) {
       return res.status(400).json({ message: 'Почта не подтверждена' });
     }
@@ -392,9 +391,12 @@ export const setPassword = async (req, res) => {
         `;
     await query(updatePasswordQuery, [hashedPassword, token]);
 
+    // Fire-and-forget notification
+    notifyViaTelegramBot(`🎉 Пользователь установил пароль и завершил регистрацию\nUser ID: ${user.id}`).catch(() => {});
+
     res.status(200).json({ message: 'Пароль успешно установлен' });
   } catch (error) {
-    console.error(error);
+    logger.error('Ошибка при установке пароля', { error: error.message });
     res.status(500).json({ message: 'Ошибка при установке пароля' });
   }
 };
@@ -502,42 +504,34 @@ export const login = async (req, res) => {
       refreshToken
     });
   } catch (error) {
-    console.error('Ошибка авторизации:', error);
+    logger.error('Ошибка авторизации', { error: error.message });
     res.status(500).json({ message: 'Ошибка авторизации' });
   }
 };
 
 // Обновление токенов
-export const refreshTokens = async (req, res) => {
+export const refreshTokens = asyncHandler(async (req, res) => {
   const { refreshToken } = req.body;
 
   if (!refreshToken) {
-    return res.status(400).json({ message: 'Токен обновления не предоставлен' });
+    throw new ValidationError('Токен обновления не предоставлен');
   }
 
   try {
     const decoded = jwt.verify(refreshToken, JWT_SECRET);
 
     const queryRequest = `SELECT * FROM user_sessions WHERE user_id = ? AND refresh_token = ?`;
-    const session = await query(queryRequest, [decoded.userId, refreshToken]);
+    const sessions = await query(queryRequest, [decoded.userId, refreshToken]);
 
-    if (!session) {
-      return res.status(400).json({ message: 'Неверный или просроченный токен обновления' });
+    if (!sessions || sessions.length === 0) {
+      throw new AuthenticationError('Неверный или просроченный токен обновления');
     }
 
     // Генерация новых токенов
-    const newAccessToken = jwt.sign({ userId: decoded.userId }, JWT_SECRET, {
-      expiresIn: JWT_EXPIRATION,
-    });
-
-    const newRefreshToken = jwt.sign({ userId: decoded.userId }, JWT_SECRET, {
-      expiresIn: JWT_REFRESH_EXPIRATION,
-    });
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } = generateTokens(decoded.userId);
 
     // Обновляем refreshToken в базе данных
-    const updateSessionQuery = `
-            UPDATE user_sessions SET refresh_token = ? WHERE user_id = ?
-        `;
+    const updateSessionQuery = `UPDATE user_sessions SET refresh_token = ? WHERE user_id = ?`;
     await query(updateSessionQuery, [newRefreshToken, decoded.userId]);
 
     res.status(200).json({
@@ -545,38 +539,53 @@ export const refreshTokens = async (req, res) => {
       refreshToken: newRefreshToken,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Ошибка обновления токенов' });
+    if (error.isOperational) {
+      throw error;
+    }
+    if (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') {
+      throw new AuthenticationError('Неверный или просроченный токен');
+    }
+    logger.error('Ошибка обновления токенов', { error: error.message });
+    throw new AuthenticationError('Ошибка обновления токенов');
   }
-};
+});
 
 // Проверка сессии
-export const checkSession = async (req, res) => {
-  const { authorization: accessToken } = req.headers;
-  if (!accessToken) {
-    return res.status(400).json({ message: 'Токен не предоставлен' });
+export const checkSession = asyncHandler(async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  
+  if (!authHeader) {
+    throw new AuthenticationError('Токен не предоставлен');
   }
+
+  // Поддерживаем формат "Bearer token" и просто "token"
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+
   try {
-    const decoded = jwt.verify(accessToken, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
 
-    const queryRequest = `SELECT * FROM users WHERE id = ?`;
-    const user = await query(queryRequest, [decoded.userId]);
+    const queryRequest = `SELECT id FROM users WHERE id = ?`;
+    const users = await query(queryRequest, [decoded.userId]);
 
-    if (!user) {
-      return res.status(400).json({ message: 'Пользователь не найден' });
+    if (!users || users.length === 0) {
+      throw new NotFoundError('Пользователь не найден');
     }
 
     res.status(200).json({ message: 'Сессия активна' });
   } catch (error) {
-    console.error(error);
-
     if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Срок действия токена истёк' });
+      throw new AuthenticationError('Срок действия токена истёк');
     }
-
-    res.status(400).json({ message: 'Неверный токен' });
+    if (error.name === 'JsonWebTokenError') {
+      throw new AuthenticationError('Неверный токен');
+    }
+    if (error.isOperational) {
+      throw error;
+    }
+    logger.error('Ошибка проверки сессии', { error: error.message });
+    throw new AuthenticationError('Ошибка проверки токена');
   }
-};
+});
 
 
 const normalizeEmail = (email) => email.toLowerCase();

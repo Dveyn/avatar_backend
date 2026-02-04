@@ -1,6 +1,7 @@
 import { query } from '../models/db.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { notifyViaTelegramBot } from '../utils/telegramBotClient.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION;
@@ -148,6 +149,11 @@ export const vkAuth = async (req, res) => {
     const { accessToken, refreshToken } = generateTokens(userId);
     await saveRefreshToken(userId, refreshToken);
 
+    // Fire-and-forget notification (do not block auth)
+    notifyViaTelegramBot(
+      `🎉 Новый пользователь зарегистрировался через VK\nUser ID: ${userId}`
+    ).catch(() => {});
+
     // Set cookies
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
@@ -213,6 +219,11 @@ export const telegramAuth = async (req, res) => {
 
     const { accessToken, refreshToken } = generateTokens(userId);
     await saveRefreshToken(userId, refreshToken);
+
+    // Fire-and-forget notification (do not block auth)
+    notifyViaTelegramBot(
+      `🎉 Новый пользователь зарегистрировался через Telegram\nUser ID: ${userId}\nTG ID: ${id}`
+    ).catch(() => {});
 
     // Set cookies
     res.cookie('accessToken', accessToken, {

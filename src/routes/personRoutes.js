@@ -1,13 +1,17 @@
 import express from 'express';
 import { getPeople, addPerson, getProfile, getAvatar, getAvatars } from '../controllers/personController.js';
 import { authenticateJWT } from '../middleware/middleware.js';
+import { validateAddPerson } from '../utils/validation.js';
 
 const router = express.Router();
 
-router.get('/', authenticateJWT, getPeople);
-router.get('/profile',authenticateJWT, getProfile)
-router.post('/add', authenticateJWT, addPerson);
-router.post('/avatar', authenticateJWT, getAvatar);
-router.post('/avatars', authenticateJWT, getAvatars);
+// Все маршруты требуют аутентификации
+router.use(authenticateJWT);
+
+router.get('/', getPeople);
+router.get('/profile', getProfile);
+router.post('/add', validateAddPerson, addPerson);
+router.post('/avatar', getAvatar);
+router.post('/avatars', getAvatars);
 
 export default router;

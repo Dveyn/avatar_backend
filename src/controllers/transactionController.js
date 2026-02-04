@@ -14,11 +14,23 @@ export const createTransaction = async (req, res) => {
     }
 
     try {
+        const numericAmount = Number(amount);
+
+        // Общая защита от "бесплатных покупок"
+        if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+            return res.status(400).json({ message: 'Сумма оплаты должна быть больше нуля', status: false });
+        }
+
+        // Жёсткое правило: покупка аватаров только полным пакетом за 7000 рублей
+        if (item.isAvatar && numericAmount !== 7000) {
+            return res.status(400).json({ message: 'Неверная сумма для покупки аватаров', status: false });
+        }
+
         const queryRequest = `
             INSERT INTO transactions (user_id, item, amount, status, description )
             VALUES (?, ?, ?, ?, ?)
         `;
-        const result = await query(queryRequest, [userId, JSON.stringify(item), amount, 'OPEN', title || '']);
+        const result = await query(queryRequest, [userId, JSON.stringify(item), numericAmount, 'OPEN', title || '']);
 
         // Возвращаем ID из результата
         const transactionId = result.insertId;
@@ -64,20 +76,13 @@ export const notificationTransaction = async (req, res) => {
         const item = JSON.parse(itemStr);
 
         if (item.isAvatar) {
-            const avatars = await query('SELECT * FROM avatars WHERE person_id = ?', [item.people_id]);
-
-            // Определяем, что использовать: avatar_id или avatar_ids
-            const avatarIds = item.avatar_ids
-                ? item.avatar_ids
-                : [item.avatar_id]; // Делаем массив с одним ID, если только один аватар
-
-            // Фильтруем и получаем все ID, которые нужно обновить
-            const idsWithAvatar = avatars.filter(a => avatarIds.includes(a.avatar_id.toString())).map(a => a.id);
-
-            // Обновляем статусы всех найденных аватаров
-            for (const id of idsWithAvatar) {
-                await query('UPDATE avatars SET purchased = ? WHERE id = ?', [1, id]);
+            if (!item.people_id) {
+                console.error('Не указан people_id для покупки аватаров');
+                return res.status(400).send('people_id is required for avatar purchase');
             }
+
+            // Новое правило: при покупке аватаров помечаем купленными ВСЕ аватары человека
+            await query('UPDATE avatars SET purchased = 1 WHERE person_id = ?', [item.people_id]);
         } else {
             if (item.posId === 2) {
                 // Находим первого человека пользователя по email
@@ -111,20 +116,13 @@ export const notificationTransactionTest = async () => {
     const item = JSON.parse(itemStr);
     
     if (item.isAvatar) {
-        const avatars = await query('SELECT * FROM avatars WHERE person_id = ?', [item.people_id]);
-
-        // Определяем, что использовать: avatar_id или avatar_ids
-        const avatarIds = item.avatar_ids
-            ? item.avatar_ids // Разбиваем строку с ID
-            : [item.avatar_id]; // Делаем массив с одним ID, если только один аватар
-
-        // Фильтруем и получаем все ID, которые нужно обновить
-        const idsWithAvatar = avatars.filter(a => avatarIds.includes(a.avatar_id.toString())).map(a => a.id);
-
-        // Обновляем статусы всех найденных аватаров
-        for (const id of idsWithAvatar) {
-            await query('UPDATE avatars SET purchased = ? WHERE id = ?', [1, id]);
+        if (!item.people_id) {
+            console.error('Не указан people_id для покупки аватаров (test)');
+            return;
         }
+
+        // Новое правило: при покупке аватаров помечаем купленными ВСЕ аватары человека
+        await query('UPDATE avatars SET purchased = 1 WHERE person_id = ?', [item.people_id]);
     } else {
         sendPayEmail(item.service, item.name, item.email, item.phone, item.date);
     }
