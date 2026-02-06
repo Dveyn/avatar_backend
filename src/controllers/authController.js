@@ -43,7 +43,7 @@ const saveRefreshToken = async (userId, refreshToken) => {
 // Проверка данных Telegram
 const verifyTelegramData = (data) => {
   const { hash, day, month, year, gender, ...otherData } = data;
-  
+
   // Сортируем только те поля, которые должны участвовать в проверке
   const dataCheckString = Object.keys(otherData)
     .sort()
@@ -78,22 +78,22 @@ const verifyTelegramData = (data) => {
 // Вспомогательная функция для преобразования даты
 const formatDate = (dateStr) => {
   if (!dateStr) return null;
-  
+
   // Если дата в формате DD.MM.YYYY
   if (dateStr.includes('.')) {
     const [day, month, year] = dateStr.split('.');
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   }
-  
+
   return dateStr;
 };
 
 // Регистрация пользователя
 export const register = async (req, res) => {
   const { provider, socialData, mail, gender, birdDay, result } = req.body;
-  
+
   logger.debug('Register request', { provider, socialData: socialData ? 'present' : 'missing', mail, gender, birdDay });
-  
+
   try {
     // Парсим данные от Telegram, если они пришли как строка
     let parsedSocialData = socialData;
@@ -103,9 +103,9 @@ export const register = async (req, res) => {
         logger.debug('Parsed social data', parsedSocialData);
       } catch (e) {
         logger.error('Failed to parse social data', { error: e.message });
-        return res.status(400).json({ 
-          isError: true, 
-          message: 'Неверный формат данных от Telegram' 
+        return res.status(400).json({
+          isError: true,
+          message: 'Неверный формат данных от Telegram'
         });
       }
     }
@@ -113,9 +113,9 @@ export const register = async (req, res) => {
     // Проверка данных от Telegram
     if (provider === 'telegram' && parsedSocialData) {
       if (!verifyTelegramData(parsedSocialData)) {
-        return res.status(400).json({ 
-          isError: true, 
-          message: 'Неверные данные от Telegram' 
+        return res.status(400).json({
+          isError: true,
+          message: 'Неверные данные от Telegram'
         });
       }
     }
@@ -123,9 +123,9 @@ export const register = async (req, res) => {
     // Проверка обязательных полей
     if (!provider && !mail) {
       logger.debug('No provider and no mail provided');
-      return res.status(400).json({ 
-        isError: true, 
-        message: 'Email или данные соцсети обязательны' 
+      return res.status(400).json({
+        isError: true,
+        message: 'Email или данные соцсети обязательны'
       });
     }
 
@@ -164,7 +164,7 @@ export const register = async (req, res) => {
         WHERE id = ?
       `;
       await query(updateQuery, [
-        JSON.stringify(parsedSocialData),
+        JSON.stringify(parsedSocialData) || null,
         provider ? true : existingUser.is_confirmed,
         existingUser.id
       ]);
@@ -209,13 +209,21 @@ export const register = async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
 
-    const socialId = provider === 'vk' ? parsedSocialData.user.user_id : parsedSocialData.id;
+    const socialId = provider === 'vk' ? parsedSocialData.user.user_id : parsedSocialData?.id;
+
+    console.log('parsedSocialData',  normalizedEmail,
+      provider || 'email',
+      socialId?.toString(),
+      JSON.stringify(parsedSocialData),
+      confirmationToken,
+      confirmationExpires,
+      provider ? true : false);
 
     const resultQuery = await query(insertUserQuery, [
       normalizedEmail,
       provider || 'email',
-      socialId?.toString(),
-      JSON.stringify(parsedSocialData),
+      socialId?.toString() || null,
+      JSON.stringify(parsedSocialData) || null,
       confirmationToken,
       confirmationExpires,
       provider ? true : false
@@ -229,9 +237,9 @@ export const register = async (req, res) => {
       VALUES (?, ?, ?, ?)
     `;
 
-    const name = provider === 'vk' 
+    const name = provider === 'vk'
       ? `${parsedSocialData.user.first_name} ${parsedSocialData.user.last_name}`
-      : parsedSocialData.first_name || 'Я';
+      : parsedSocialData?.first_name;
 
     const userGender = provider === 'vk'
       ? (parsedSocialData.user.sex === 2 ? 'male' : parsedSocialData.user.sex === 1 ? 'female' : null)
@@ -243,7 +251,7 @@ export const register = async (req, res) => {
 
     const resultQueryPiple = await query(queryPiple, [
       userId,
-      name,
+      name || 'Я',
       userGender,
       birthDate
     ]);
@@ -252,7 +260,7 @@ export const register = async (req, res) => {
 
     // Добавляем аватары
     const avatars = [
-      { keyWord: 'A', avatar_id: result.A, purchased: 0, preview: 1 },
+      { keyWord: 'A', avatar_id: result.A, purchased: 0, preview: 0 },
       { keyWord: 'B', avatar_id: result.B, purchased: 0, preview: 0 },
       { keyWord: 'V', avatar_id: result.V, purchased: 0, preview: 0 },
       { keyWord: 'G', avatar_id: result.G, purchased: 0, preview: 0 },
@@ -287,8 +295,8 @@ export const register = async (req, res) => {
       provider === 'vk' ? parsedSocialData?.user?.user_id : parsedSocialData?.id;
     notifyViaTelegramBot(
       `🎉 Новый пользователь зарегистрировался через ${provider}\nUser ID: ${userId}` +
-        (socialIdForNotify ? `\nSocial ID: ${socialIdForNotify}` : '')
-    ).catch(() => {});
+      (socialIdForNotify ? `\nSocial ID: ${socialIdForNotify}` : '')
+    ).catch(() => { });
 
     // Устанавливаем куки
     res.cookie('accessToken', accessToken, {
@@ -392,7 +400,7 @@ export const setPassword = async (req, res) => {
     await query(updatePasswordQuery, [hashedPassword, token]);
 
     // Fire-and-forget notification
-    notifyViaTelegramBot(`🎉 Пользователь установил пароль и завершил регистрацию\nUser ID: ${user.id}`).catch(() => {});
+    notifyViaTelegramBot(`🎉 Пользователь установил пароль и завершил регистрацию\nUser ID: ${user.id}`).catch(() => { });
 
     res.status(200).json({ message: 'Пароль успешно установлен' });
   } catch (error) {
@@ -404,7 +412,7 @@ export const setPassword = async (req, res) => {
 // Авторизация
 export const login = async (req, res) => {
   const { email, password, provider, socialData } = req.body;
-  
+
   try {
     let user = null;
 
@@ -414,21 +422,21 @@ export const login = async (req, res) => {
       try {
         parsedSocialData = JSON.parse(socialData);
       } catch (e) {
-        return res.status(400).json({ 
-          isError: true, 
-          message: 'Неверный формат данных от соцсети' 
+        return res.status(400).json({
+          isError: true,
+          message: 'Неверный формат данных от соцсети'
         });
       }
 
       // Получаем ID пользователя в зависимости от провайдера
-      const socialId = provider === 'vk' 
-        ? parsedSocialData.user.user_id 
+      const socialId = provider === 'vk'
+        ? parsedSocialData.user.user_id
         : parsedSocialData.id;
 
       if (!socialId) {
-        return res.status(400).json({ 
-          isError: true, 
-          message: 'ID пользователя не найден' 
+        return res.status(400).json({
+          isError: true,
+          message: 'ID пользователя не найден'
         });
       }
 
@@ -553,7 +561,7 @@ export const refreshTokens = asyncHandler(async (req, res) => {
 // Проверка сессии
 export const checkSession = asyncHandler(async (req, res) => {
   const authHeader = req.headers['authorization'];
-  
+
   if (!authHeader) {
     throw new AuthenticationError('Токен не предоставлен');
   }
