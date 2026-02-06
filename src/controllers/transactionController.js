@@ -22,9 +22,9 @@ export const createTransaction = async (req, res) => {
         }
 
         // Жёсткое правило: покупка аватаров только полным пакетом за 7000 рублей
-        if (item.isAvatar && numericAmount !== 7000) {
-            return res.status(400).json({ message: 'Неверная сумма для покупки аватаров', status: false });
-        }
+        // if (item.isAvatar && numericAmount !== 7000) {
+        //     return res.status(400).json({ message: 'Неверная сумма для покупки аватаров', status: false });
+        // }
 
         const queryRequest = `
             INSERT INTO transactions (user_id, item, amount, status, description )
